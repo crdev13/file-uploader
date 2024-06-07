@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bytes"
     "crypto/aes"
     "crypto/cipher"
     "crypto/rand"
@@ -62,6 +63,16 @@ func main() {
         return ctx.SendString(fmt.Sprintf("uploaded: %s", fileName))
     })
 
+    app.Get("/download/:filename", func(ctx fiber.Ctx) error {
+        fileName := ctx.Params("filename")
+        file, err := readFile(fileName)
+        if err != nil {
+            return err
+        }
+
+        return ctx.SendStream(file)
+    })
+
     // Start the server on port 3000
     log.Fatal(app.Listen(":3000"))
 }
@@ -107,4 +118,38 @@ func encrypt(data []byte) ([]byte, error) {
     }
 
     return gcm.Seal(nonce, nonce, data, nil), nil
+}
+
+func readFile(fileName string) (io.Reader, error) {
+    filepath := filepath.Join(storeName, fileName)
+    encryptedData, err := os.ReadFile(filepath)
+    if err != nil {
+        return nil, errors.New("unable to read file")
+    }
+
+    decryptedData, err := decrypt(encryptedData)
+    if err != nil {
+        return nil, errors.New("unable to decrypt file")
+    }
+    return bytes.NewReader(decryptedData), nil
+}
+
+func decrypt(data []byte) ([]byte, error) {
+    block, err := aes.NewCipher(encryptionKey)
+    if err != nil {
+        return nil, err
+    }
+
+    gcm, err := cipher.NewGCM(block)
+    if err != nil {
+        return nil, err
+    }
+
+    nonceSize := gcm.NonceSize()
+    if len(data) < nonceSize {
+        return nil, fmt.Errorf("ciphertext too short")
+    }
+
+    nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+    return gcm.Open(nil, nonce, ciphertext, nil)
 }
